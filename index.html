@@ -33,8 +33,6 @@
             position:relative
         }
 
-
-
         span,
         input{ 
             position: absolute;
@@ -43,7 +41,6 @@
             display: inline-flex;
             justify-content: center;
             align-items: center;
-
         }
 
         input{
@@ -58,16 +55,14 @@
             outline: 2px solid #09f;
             }
         }
-
     </style>
     <script type="module">
         const $ = Element => document.querySelector(Element)
         const $$ = Element => document.querySelectorAll(Element)
 
-              const $table = $('table')
-            const $head = $('thead')
-            const $body = $('tbody')
-
+        const $table = $('table')
+        const $head = $('thead')
+        const $body = $('tbody')
 
         const ROWS = 10
         const COLUMNS = 10
@@ -77,20 +72,45 @@
         const getColumn = i => String.fromCharCode(FIRST_CHAR_CODE + i)
 
         let STATE = times(COLUMNS)
-          .map(i => times(ROWS).map(j => ({computedValue: j, value: 'j'})))
+          .map(i => times(ROWS).map(j => ({computedValue: 0, value: 0})))
 
-        console.log(STATE)
+        function computeValue(value) {
+            if (typeof value !== 'string') return value
+            if (!value.startsWith('=')) return value
+
+            const formula = value.slice(1)
+
+            let computedValue
+            try {
+                computedValue = eval(formula)
+            } catch(e) {
+                computedValue = `!ERROR: ${e.message}`
+            }
+            return computedValue
+        }
+
+        function updateCell ({ x, y, value}) {
+            const newState = structuredClone(STATE)
+
+            const cell = newState[x][y]
+
+            cell.computedValue = computeValue(value) // span
+            cell.value = value // input
+
+            newState[x][y] = cell
+
+            STATE = newState
+
+            renderSpreadSheet()
+        }
 
         const renderSpreadSheet = () => {
-      
-            
             const headerHTML = `<tr>
                 <th></th>
                 ${times(COLUMNS).map(i => `<th>${getColumn(i)}</th>`).join('')}
                 </tr>`
             $head.innerHTML = headerHTML
 
-          
             const bodyHTML = times(ROWS).map(row => {
                 return `<tr>
                 <td>${row + 1}</td>
@@ -105,18 +125,28 @@
             
             $body.innerHTML = bodyHTML                  
         }
-$body.addEventListener('click', event => {
-    const td = event.target.closest('td')
-    if (!td) return
 
-    const {x, y} = td.dataset
-    const input = td.querySelector('input')
-    const span = td.querySelector('span')
-  
-    const end = input.value.length
-    input.setSelectionRange(end, end)
-    input.focus()
-})
+        $body.addEventListener('click', event => {
+            const td = event.target.closest('td')
+            if (!td) return
+
+            const {x, y} = td.dataset
+            const input = td.querySelector('input')
+            
+            const end = input.value.length
+            input.setSelectionRange(end, end)
+            input.focus()
+
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') input.blur()
+            })
+
+            input.addEventListener('blur', () => {
+                if (input.value === STATE[x][y].value) return
+                updateCell({x, y, value: input.value})
+            }, { once: true})
+        })
+
         renderSpreadSheet()
     </script>
 </head>
@@ -124,10 +154,8 @@ $body.addEventListener('click', event => {
    <img src="https://upload.wikimedia.org/wikipedia/commons/6/60/Microsoft_Office_Excel_%282025%E2%80%93present%29.svg?utm_source=es.wikipedia.org&utm_campaign=index&utm_content=original.png"/>
 <table>
     <thead>
-
     </thead>
     <tbody>
-
     </tbody>
 </table>
 </body>
