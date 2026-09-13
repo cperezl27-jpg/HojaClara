@@ -54,7 +54,15 @@
             opacity: 1;
             outline: 2px solid #09f;
             }
+
         }
+        .selected{
+            background: rgb(0, 255, 17);
+        }
+        th.selected{
+            background: rgba(50, 177, 88, 0.785);
+        }
+
     </style>
     <script type="module">
         const $ = Element => document.querySelector(Element)
@@ -70,6 +78,8 @@
 
         const times = length => Array.from({ length }, (_, i) => i)
         const getColumn = i => String.fromCharCode(FIRST_CHAR_CODE + i)
+
+        let selectedColumn = null
 
         let STATE = times(COLUMNS)
           .map(i => times(ROWS).map(j => ({computedValue: 0, value: 0})))
@@ -170,6 +180,21 @@
                 updateCell({x, y, value: input.value})
             }, { once: true})
         })
+
+        $head.addEventListener('click', event =>{
+            const th = event.target.closest('th')
+            if (!th) return
+
+            const x = [ ... th.parentNode.children].indexOf(th)
+            if (x <= 0) return
+
+            selectedColumn = x - 1
+
+            $$('.selected').forEach(el => el.classList.remove('selected'))
+
+            th.classList.add('selected')
+            $$(`tr td:nth-child(${x + 1})`).forEach (el => el.classList.add('selected'))
+})
 
         renderSpreadSheet()
     </script>
