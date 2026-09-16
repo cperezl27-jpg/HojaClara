@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>hojaclara.js</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            margin: 16px;
+        }
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
+        .header-bar {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 12px;
+        }
+        img {
+            max-width: 40px;
+            height: auto;
+        }
+        .btn-export {
+            background-color: #107c41;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .btn-export:hover {
+            background-color: #0b582e;
+        }
+        
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #fff;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .cell-indicator {
+            width: 40px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 14px;
+            background: #eee;
+            padding: 4px;
+            border-radius: 2px;
+            border: 1px solid #ccc;
+        }
+        .formula-bar {
+            flex-grow: 1;
+            padding: 6px 12px;
+            border: 1px solid #ccc;
+            border-radius: 2px;
+            font-size: 14px;
+        }
+        .formula-bar:disabled {
+            background-color: #f0f0f0;
+        }
+        .format-btn {
+            background: #fff;
+            border: 1px solid #ccc;
+            padding: 4px 10px;
+            cursor: pointer;
+            border-radius: 2px;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.1s;
+        }
+        .format-btn:hover {
+            background: #e9ecef;
+        }
+        .format-btn.active {
+            background: #cce5ff;
+            border-color: #99c2ff;
+        }
+        input[type="color"] {
+            padding: 0;
+            width: 30px;
+            height: 28px;
+            border: 1px solid #ccc;
+            border-radius: 2px;
+            cursor: pointer;
+        }
+
+        table {
+            border-collapse: collapse;
+        }
+        thead, tr td:first-child {
+            background: #eee;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            font-weight: normal;
+            font-size: 12px;
+            text-align: center;
+            width: 64px;
+            height: 24px;
+            vertical-align: middle;
+            position: relative;
+        }
+        
+        td span, td input { 
+            position: absolute;
+            inset: 0;
+            vertical-align: middle;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+        }
+        td input {
+            border: 0;
+            opacity: 0;
+            pointer-events: none;
+            width: 100%;
+            border-radius: 2px;
+            font-weight: inherit;
+            font-style: inherit;
+            text-align: inherit;
+            background: inherit;
+        }
+        td input:focus {
+            opacity: 1;
+            outline: 2px solid #09f;
+            background: #fff;
+        }
+
+        td.selected {
+            background: rgb(0, 255, 17) !important;
+        }
+        th.selected {
+            background: rgba(50, 177, 88, 0.785) !important;
+        }
+        td.cell-active {
+            outline: 2px solid #09f;
+            outline-offset: -2px;
+        }
+    </style>
+    <script type="module">
+        const $ = Element => document.querySelector(Element)
+        const $$ = Element => document.querySelectorAll(Element)
+
+        const $head = $('thead')
+        const $body = $('tbody')
+        const $exportBtn = $('#export-btn')
+
+        const $cellIndicator = $('#cell-indicator')
+        const $formulaBar = $('#formula-bar')
+        const $btnBold = $('#btn-bold')
+        const $btnItalic = $('#btn-italic')
+        const $btnAlignLeft = $('#btn-align-left')
+        const $btnAlignCenter = $('#btn-align-center')
+        const $btnAlignRight = $('#btn-align-right')
+        const $colorPicker = $('#color-picker')
+
+        const ROWS = 10
+        const COLUMNS = 10
+        const FIRST_CHAR_CODE = 65
+        const STORAGE_KEY = 'HOJACLARA_STATE_V2'
+
+        const times = length => Array.from({ length }, (_, i) => i)
+        const getColumn = i => String.fromCharCode(FIRST_CHAR_CODE + i)
+
+        let selectedColumn = null
+        let activeCell = null
+
+        function loadFromLocalStorage() {
+            const saved = localStorage.getItem(STORAGE_KEY)
+            const defaultStyle = { b: false, i: false, a: 'center', bg: '#ffffff' }
+            
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved)
+                    return parsed.map(col => col.map(cell => ({
+                        ...cell,
+                        style: cell.style || { ...defaultStyle }
+                    })))
+                } catch(e) {
+                    console.error('Error al cargar LocalStorage:', e)
+                }
+            }
+            return times(COLUMNS).map(i => times(ROWS).map(j => ({
+                computedValue: 0, 
+                value: 0,
+                style: { ...defaultStyle }
+            })))
+        }
+
+        function saveToLocalStorage(state) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+        }
+
+        let STATE = loadFromLocalStorage()
+
+        function parseCellId(cellId) {
+            const letter = cellId.match(/[A-Z]+/)?.[0]
+            const number = cellId.match(/\d+/)?.[0]
+            if (!letter || !number) return null
+            const x = letter.charCodeAt(0) - FIRST_CHAR_CODE
+            const y = parseInt(number, 10) - 1
+            return { x, y }
+        }
+
+        function expandRange(startId, endId) {
+            const pos1 = parseCellId(startId)
+            const pos2 = parseCellId(endId)
+            if (!pos1 || !pos2) return []
+            
+            const startX = Math.min(pos1.x, pos2.x)
+            const endX = Math.max(pos1.x, pos2.x)
+            const startY = Math.min(pos1.y, pos2.y)
+            const endY = Math.max(pos1.y, pos2.y)
+            
+            const cells = []
+            for (let x = startX; x <= endX; x++) {
+                for (let y = startY; y <= endY; y++) {
+                    cells.push(`${getColumn(x)}${y + 1}`)
+                }
+            }
+            return cells
+        }
+
+        function getReferences(formula) {
+            const expandedFormula = formula.replace(/([A-Z]+\d+)\s*:\s*([A-Z]+\d+)/g, (_, p1, p2) => expandRange(p1, p2).join(','))
+            const matches = expandedFormula.match(/[A-Z]+\d+/g) || []
+            return [...new Set(matches)]
+        }
+
+        function hasCircularReference(startId, currentId, state, visited = new Set()) {
+            if (visited.has(currentId)) return false
+            visited.add(currentId)
+
+            const pos = parseCellId(currentId)
+            if (!pos || pos.x < 0 || pos.x >= COLUMNS || pos.y < 0 || pos.y >= ROWS) return false
+
+            const cellValue = String(state[pos.x][pos.y].value).toUpperCase()
+            if (!cellValue.startsWith('=')) return false
+
+            const refs = getReferences(cellValue.slice(1))
+            for (const ref of refs) {
+                if (ref === startId) return true
+                if (hasCircularReference(startId, ref, state, visited)) return true
+            }
+            return false
+        }
+
+        function computeValue(value, state, currentCellId) {
+            if (typeof value !== 'string') return value
+            if (!value.startsWith('=')) return value
+
+            let formula = value.slice(1).toUpperCase()
+            
+            let processedFormula = formula
+                .replace(/([A-Z]+\d+)\s*:\s*([A-Z]+\d+)/g, (_, p1, p2) => expandRange(p1, p2).join(','))
+                .replace(/;/g, ',')
+
+            const refs = getReferences(formula)
+
+            for (const ref of refs) {
+                const pos = parseCellId(ref)
+                if (!pos || pos.x < 0 || pos.x >= COLUMNS || pos.y < 0 || pos.y >= ROWS) {
+                    return '#REF!'
+                }
+            }
+
+            if (currentCellId && hasCircularReference(currentCellId, currentCellId, state)) {
+                return '#CIRCULAR!'
+            }
+
+            const constants = generateCellsConstants(state)
+
+            let computedValue
+            try {
+                computedValue = eval(`(() => {
+                    ${constants}
+                    const SUMA = (...args) => args.reduce((a, b) => a + (Number(b) || 0), 0);
+                    const PROMEDIO = (...args) => args.length ? SUMA(...args) / args.length : 0;
+                    const MAX = (...args) => args.length ? Math.max(...args.map(Number)) : 0;
+                    const MIN = (...args) => args.length ? Math.min(...args.map(Number)) : 0;
+                    return ${processedFormula};
+                })()`)
+
+                if (computedValue === Infinity || computedValue === -Infinity || Number.isNaN(computedValue)) {
+                    return '#DIV/0!'
+                }
+            } catch(e) {
+                return '#ERROR!'
+            }
+            return computedValue
+        }
+
+        function updateCell ({ x, y, value}) {
+            const newState = structuredClone(STATE)
+            const currentCellId = `${getColumn(x)}${y + 1}`
+
+            newState[x][y].value = value
+            newState[x][y].computedValue = computeValue(value, newState, currentCellId)
+
+            computeAllCells(newState)
+            STATE = newState
+            saveToLocalStorage(STATE)
+            renderSpreadSheet()
+
+            if (activeCell && activeCell.x === x && activeCell.y === y) {
+                const activeTd = $body.querySelector(`td[data-x="${x}"][data-y="${y}"]`)
+                if (activeTd) activeTd.classList.add('cell-active')
+            }
+        }
+
+        function generateCellsConstants (cells) {
+            return cells.map ((rows, x) => {
+                return rows.map ((cell, y) => {
+                    const letter = getColumn(x)
+                    const cellId = `${letter}${y + 1}`
+                    // Forzamos la conversión a número si es posible; si está vacío o es texto no numérico, asignamos 0
+                    const cellVal = cell.computedValue;
+                    const numericValue = (cellVal === '' || isNaN(Number(cellVal))) ? 0 : Number(cellVal);
+                    return `const ${cellId} = ${numericValue};`
+                }).join('\n')
+            }).join('\n')
+        }
+
+        function computeAllCells(cells){
+            for (let pass = 0; pass < 2; pass++) {
+                cells.forEach((rows, x) => {
+                    rows.forEach((cell, y) => {
+                        const cellId = `${getColumn(x)}${y + 1}`
+                        cell.computedValue = computeValue(cell.value, cells, cellId)
+                    })
+                })
+            }
+        }
+
+        function exportToCSV() {
+            let csvContent = ''
+            for (let row = 0; row < ROWS; row++) {
+                const rowValues = []
+                for (let col = 0; col < COLUMNS; col++) {
+                    let cellVal = String(STATE[col][row].computedValue ?? '')
+                    cellVal = cellVal.replace(/"/g, '""')
+                    if (cellVal.includes(',') || cellVal.includes('\n') || cellVal.includes('"')) {
+                        cellVal = `"${cellVal}"`
+                    }
+                    rowValues.push(cellVal)
+                }
+                csvContent += rowValues.join(',') + '\r\n'
+            }
+            const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
+            const url = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            
+            link.setAttribute('href', url)
+            link.setAttribute('download', 'hojaclara.csv')
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            URL.revokeObjectURL(url)
+        }
+
+        function selectCell(x, y) {
+            activeCell = { x, y }
+            const cell = STATE[x][y]
+            
+            $cellIndicator.textContent = `${getColumn(x)}${y + 1}`
+            $formulaBar.value = cell.value
+            $formulaBar.disabled = false
+            
+            $btnBold.classList.toggle('active', cell.style.b)
+            $btnItalic.classList.toggle('active', cell.style.i)
+            $btnAlignLeft.classList.toggle('active', cell.style.a === 'left')
+            $btnAlignCenter.classList.toggle('active', cell.style.a === 'center')
+            $btnAlignRight.classList.toggle('active', cell.style.a === 'right')
+            $colorPicker.value = cell.style.bg || '#ffffff'
+
+            $$('td.cell-active').forEach(el => el.classList.remove('cell-active'))
+            const targetTd = $body.querySelector(`td[data-x="${x}"][data-y="${y}"]`)
+            if (targetTd) targetTd.classList.add('cell-active')
+        }
+
+        function applyFormatToActiveCell(formatKey, value) {
+            if (!activeCell) return
+            const { x, y } = activeCell
+            STATE[x][y].style[formatKey] = value
+            saveToLocalStorage(STATE)
+            renderSpreadSheet()
+            selectCell(x, y)
+        }
+
+        $formulaBar.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && activeCell) {
+                updateCell({ x: activeCell.x, y: activeCell.y, value: $formulaBar.value })
+                $formulaBar.blur()
+            }
+        })
+
+        $btnBold.addEventListener('click', () => activeCell && applyFormatToActiveCell('b', !STATE[activeCell.x][activeCell.y].style.b))
+        $btnItalic.addEventListener('click', () => activeCell && applyFormatToActiveCell('i', !STATE[activeCell.x][activeCell.y].style.i))
+        $btnAlignLeft.addEventListener('click', () => applyFormatToActiveCell('a', 'left'))
+        $btnAlignCenter.addEventListener('click', () => applyFormatToActiveCell('a', 'center'))
+        $btnAlignRight.addEventListener('click', () => applyFormatToActiveCell('a', 'right'))
+        $colorPicker.addEventListener('input', (e) => applyFormatToActiveCell('bg', e.target.value))
+
+        const renderSpreadSheet = () => {
+            const headerHTML = `<tr>
+                <th></th>
+                ${times(COLUMNS).map(i => `<th>${getColumn(i)}</th>`).join('')}
+                </tr>`
+            $head.innerHTML = headerHTML
+
+            const bodyHTML = times(ROWS).map(row => {
+                return `<tr>
+                <td>${row + 1}</td>
+                ${times(COLUMNS).map(column => {
+                    const cell = STATE[column][row]
+                    const sty = cell.style
+                    
+                    const cssStr = `
+                        font-weight: ${sty.b ? 'bold' : 'normal'}; 
+                        font-style: ${sty.i ? 'italic' : 'normal'}; 
+                        background-color: ${sty.bg};
+                    `
+                    return `
+                    <td data-x="${column}" data-y="${row}" style="${cssStr}">
+                        <span style="justify-content: ${sty.a === 'center' ? 'center' : (sty.a === 'right' ? 'flex-end' : 'flex-start')}">
+                            ${cell.computedValue}
+                        </span>
+                        <input type="text" value="${cell.value}" style="text-align: ${sty.a}"/> 
+                    </td>
+                    `
+                }).join('')}
+                </tr>`
+            }).join('')
+            
+            $body.innerHTML = bodyHTML                  
+        }
+
+        $body.addEventListener('click', event => {
+            const td = event.target.closest('td')
+            if (!td) return
+
+            const {x, y} = td.dataset
+            const numX = Number(x)
+            const numY = Number(y)
+            
+            selectCell(numX, numY)
+
+            const input = td.querySelector('input')
+            const end = input.value.length
+            input.setSelectionRange(end, end)
+            input.focus()
+
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') input.blur()
+            })
+
+            input.addEventListener('blur', () => {
+                $formulaBar.value = input.value
+                if (input.value === STATE[numX][numY].value) return
+                updateCell({x: numX, y: numY, value: input.value})
+            }, { once: true})
+        })
+
+        $head.addEventListener('click', event =>{
+            const th = event.target.closest('th')
+            if (!th) return
+
+            const x = [ ... th.parentNode.children].indexOf(th)
+            if (x <= 0) return
+
+            selectedColumn = x - 1
+
+            $$('.selected').forEach(el => el.classList.remove('selected'))
+            $$('td.cell-active').forEach(el => el.classList.remove('cell-active'))
+            
+            activeCell = null
+            $cellIndicator.textContent = '-'
+            $formulaBar.value = ''
+            $formulaBar.disabled = true
+
+            th.classList.add('selected')
+            $$(`tr td:nth-child(${x + 1})`).forEach (el => el.classList.add('selected'))
+        })
+
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Backspace' && event.target.tagName !== 'INPUT') {
+                if (selectedColumn !== null) {
+                    times(ROWS).forEach(row => {
+                        updateCell({ x: selectedColumn, y: row, value: ''})
+                    })    
+                    renderSpreadSheet()
+                } else if (activeCell !== null) {
+                    updateCell({ x: activeCell.x, y: activeCell.y, value: ''})
+                    $formulaBar.value = ''
+                }
+            }
+        })
+
+        document.addEventListener('copy', event => {
+            if (selectedColumn !== null) {
+                const columnValues = times(ROWS).map(row =>{
+                    return STATE[selectedColumn][row].computedValue
+                })
+                event.clipboardData.setData('text/plain', columnValues.join('\n'))
+                event.preventDefault()
+            }
+        })
+
+        $exportBtn.addEventListener('click', exportToCSV)
+
+        computeAllCells(STATE)
+        renderSpreadSheet()
+    </script>
+</head>
+<body>
+    <div class="header-bar">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/6/60/Microsoft_Office_Excel_%282025%E2%80%93present%29.svg?utm_source=es.wikipedia.org&utm_campaign=index&utm_content=original.png"/>
+        <button id="export-btn" class="btn-export">Descargar CSV</button>
+    </div>
+    
+    <div class="toolbar">
+        <div id="cell-indicator" class="cell-indicator">-</div>
+        <input type="text" id="formula-bar" class="formula-bar" placeholder="" disabled />
+        
+        <button id="btn-bold" class="format-btn" title="Negrita"><b>B</b></button>
+        <button id="btn-italic" class="format-btn" title="Cursiva"><i>I</i></button>
+        
+        <button id="btn-align-left" class="format-btn" title="Alinear a la izquierda">⇇</button>
+        <button id="btn-align-center" class="format-btn" title="Centrar">↔</button>
+        <button id="btn-align-right" class="format-btn" title="Alinear a la derecha">⇉</button>
+        
+        <input type="color" id="color-picker" title="Color de fondo" value="#ffffff"/>
+    </div>
+
+    <table>
+        <thead>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+</body>
+</html>
