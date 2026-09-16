@@ -111,7 +111,6 @@
             position: relative;
         }
         
-        /* Corrección 1: Asegurar que los inputs invisibles solo sean los de las celdas (td) */
         td span, td input { 
             position: absolute;
             inset: 0;
@@ -137,7 +136,6 @@
             background: #fff;
         }
 
-        /* Corrección 2: Agregar !important para superar los colores de fondo aplicados individualmente a cada celda */
         td.selected {
             background: rgb(0, 255, 17) !important;
         }
@@ -205,7 +203,6 @@
 
         let STATE = loadFromLocalStorage()
 
-        // Auxiliares para cálculo de referencias y errores
         function parseCellId(cellId) {
             const letter = cellId.match(/[A-Z]+/)?.[0]
             const number = cellId.match(/\d+/)?.[0]
@@ -215,8 +212,28 @@
             return { x, y }
         }
 
+        function expandRange(startId, endId) {
+            const pos1 = parseCellId(startId)
+            const pos2 = parseCellId(endId)
+            if (!pos1 || !pos2) return []
+            
+            const startX = Math.min(pos1.x, pos2.x)
+            const endX = Math.max(pos1.x, pos2.x)
+            const startY = Math.min(pos1.y, pos2.y)
+            const endY = Math.max(pos1.y, pos2.y)
+            
+            const cells = []
+            for (let x = startX; x <= endX; x++) {
+                for (let y = startY; y <= endY; y++) {
+                    cells.push(`${getColumn(x)}${y + 1}`)
+                }
+            }
+            return cells
+        }
+
         function getReferences(formula) {
-            const matches = formula.match(/[A-Z]+\d+/g) || []
+            const expandedFormula = formula.replace(/([A-Z]+\d+)\s*:\s*([A-Z]+\d+)/g, (_, p1, p2) => expandRange(p1, p2).join(','))
+            const matches = expandedFormula.match(/[A-Z]+\d+/g) || []
             return [...new Set(matches)]
         }
 
@@ -227,7 +244,7 @@
             const pos = parseCellId(currentId)
             if (!pos || pos.x < 0 || pos.x >= COLUMNS || pos.y < 0 || pos.y >= ROWS) return false
 
-            const cellValue = String(state[pos.x][pos.y].value)
+            const cellValue = String(state[pos.x][pos.y].value).toUpperCase()
             if (!cellValue.startsWith('=')) return false
 
             const refs = getReferences(cellValue.slice(1))
@@ -242,7 +259,12 @@
             if (typeof value !== 'string') return value
             if (!value.startsWith('=')) return value
 
-            const formula = value.slice(1)
+            let formula = value.slice(1).toUpperCase()
+            
+            let processedFormula = formula
+                .replace(/([A-Z]+\d+)\s*:\s*([A-Z]+\d+)/g, (_, p1, p2) => expandRange(p1, p2).join(','))
+                .replace(/;/g, ',')
+
             const refs = getReferences(formula)
 
             for (const ref of refs) {
@@ -262,7 +284,11 @@
             try {
                 computedValue = eval(`(() => {
                     ${constants}
-                    return ${formula};
+                    const SUMA = (...args) => args.reduce((a, b) => a + (Number(b) || 0), 0);
+                    const PROMEDIO = (...args) => args.length ? SUMA(...args) / args.length : 0;
+                    const MAX = (...args) => args.length ? Math.max(...args.map(Number)) : 0;
+                    const MIN = (...args) => args.length ? Math.min(...args.map(Number)) : 0;
+                    return ${processedFormula};
                 })()`)
 
                 if (computedValue === Infinity || computedValue === -Infinity || Number.isNaN(computedValue)) {
@@ -297,7 +323,9 @@
                 return rows.map ((cell, y) => {
                     const letter = getColumn(x)
                     const cellId = `${letter}${y + 1}`
-                    const numericValue = typeof cell.computedValue === 'number' ? cell.computedValue : 0
+                    // Forzamos la conversión a número si es posible; si está vacío o es texto no numérico, asignamos 0
+                    const cellVal = cell.computedValue;
+                    const numericValue = (cellVal === '' || isNaN(Number(cellVal))) ? 0 : Number(cellVal);
                     return `const ${cellId} = ${numericValue};`
                 }).join('\n')
             }).join('\n')
@@ -490,7 +518,6 @@
 
         $exportBtn.addEventListener('click', exportToCSV)
 
-        // Inicialización del cálculo y renderizado con los datos guardados
         computeAllCells(STATE)
         renderSpreadSheet()
     </script>
